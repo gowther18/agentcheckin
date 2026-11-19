@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentCheckin — Daily Check-in for Agent ID Holders</title>
+<script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f0f0f; color: #f5f5f5; min-height: 100vh; }
+  .wrap { max-width: 560px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 28px; text-align: center; }
+  h1 span { color: #f0b90b; }
+  .sub { text-align: center; color: #aaa; margin: 8px 0 24px; font-size: 14px; line-height: 1.5; }
+  .card { background: #1c1c1c; border: 1px solid #2c2c2c; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  .card h2 { font-size: 16px; margin-bottom: 12px; color: #f0b90b; }
+  .row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2c2c2c; font-size: 14px; }
+  .row:last-child { border-bottom: none; }
+  .row .label { color: #aaa; }
+  .row .value { font-weight: 600; word-break: break-all; text-align: right; }
+  .holder-yes { color: #2ebd85; }
+  .holder-no { color: #f6465d; }
+  button { width: 100%; padding: 14px; font-size: 16px; font-weight: 700; border: none; border-radius: 10px; cursor: pointer; background: #f0b90b; color: #111; }
+  button:disabled { background: #3a3a3a; color: #888; cursor: not-allowed; }
+  button.secondary { background: #2c2c2c; color: #f5f5f5; margin-top: 8px; }
+  .status { text-align: center; font-size: 14px; color: #aaa; margin-top: 12px; min-height: 20px; }
+  .status.error { color: #f6465d; }
+  .status.ok { color: #2ebd85; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 8px 4px; text-align: left; border-bottom: 1px solid #2c2c2c; }
+  th { color: #aaa; font-weight: 600; }
+  td.addr { word-break: break-all; }
+  .muted { color: #888; font-size: 13px; text-align: center; padding: 12px 0; }
+  .footer { text-align: center; color: #666; font-size: 12px; margin-top: 24px; line-height: 1.6; }
+  .footer a { color: #f0b90b; text-decoration: none; }
+  .notice { background: #2a2103; border: 1px solid #f0b90b; border-radius: 12px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.5; color: #f5d76e; }
+  .streak-big { font-size: 40px; font-weight: 800; text-align: center; color: #f0b90b; }
+  .streak-label { text-align: center; color: #aaa; font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>✅ Agent<span>Checkin</span></h1>
+  <p class="sub">Daily check-in for Binance Agent ID holders.<br>Check in once a day, build your streak, climb the leaderboard.</p>
+
+  <div id="deployNotice" class="notice" style="display:none">
+    Contract not deployed yet — this UI is in preview mode. Set <code>CONTRACT_ADDRESS</code> in the source after deployment.
+  </div>
+
+  <div class="card">
+    <h2>Wallet</h2>
+    <div class="row"><span class="label">Network</span><span class="value" id="network">—</span></div>
+    <div class="row"><span class="label">Address</span><span class="value" id="address">Not connected</span></div>
+    <div class="row"><span class="label">Agent ID holder</span><span class="value" id="holder">—</span></div>
+    <button id="connectBtn">Connect Wallet</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="card">
+    <h2>Your Streak</h2>
+    <div class="streak-big" id="streak">—</div>
+    <div class="streak-label">consecutive days</div>
+    <div class="row"><span class="label">Your total check-ins</span><span class="value" id="myTotal">—</span></div>
+    <div class="row"><span class="label">Last check-in day</span><span class="value" id="lastDay">—</span></div>
+    <div class="row"><span class="label">Total check-ins (all users)</span><span class="value" id="globalTotal">—</span></div>
+    <div style="height:12px"></div>
+    <button id="checkinBtn" disabled>Check In Today</button>
+    <div class="status" id="checkinStatus"></div>
+  </div>
+
+  <div class="card">
+    <h2>🏆 Leaderboard — Top 10</h2>
+    <div id="leaderboard"><p class="muted">Connect a wallet to load the leaderboard.</p></div>
+    <button class="secondary" id="refreshBtn">Refresh Leaderboard</button>
+  </div>
+
+  <div class="footer">
+    Contract: <span id="contractAddr">TBD</span><br>
+    Built for the <a href="https://www.binance.com/en/support/announcement/detail/95f5dbe0ea674a48a739b59e046648bf" target="_blank" rel="noopener">Binance Agent ID Hackathon</a> ·
+    <a href="https://github.com/gowther18/agentcheckin" target="_blank" rel="noopener">GitHub</a><br>
+    Only Agent ID holders can check in — verified on-chain via the SPACE ID registry.
+  </div>
+</div>
+
+<script>
+// ---------- Config ----------
+// Fill in after deployment. Until then the UI runs in preview mode.
+const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000"; // TBD
+const DEPLOY_BLOCK = 0; // set to the deployment block after deploy (speeds up leaderboard)
+const BSC_CHAIN_ID = 56;
+const AGENT_ID_REGISTRY = "0x60B9262456dE011F7d15a54CdD8c48bAaa8B022F";
+
+const ABI = [
+  "function checkIn() external",
+  "function agentIdRegistry() view returns (address)",
+  "function lastCheckinDay(address) view returns (uint256)",
+  "function streak(address) view returns (uint256)",
+  "function totalCheckins(address) view returns (uint256)",
+  "function totalCheckinsAll() view returns (uint256)",
+  "function getStreak(address) view returns (uint256)",
+  "function getTotalCheckins(address) view returns (uint256)",
+  "function getLastCheckinDay(address) view returns (uint256)",
+  "event CheckIn(address indexed user, uint256 indexed day, uint256 streak)"
+];
+const REGISTRY_ABI = ["function balanceOf(address) view returns (uint256)"];
+
+const $ = (id) => document.getElementById(id);
+let provider, signer, contract, registry, userAddress = null;
+
+const isDeployed = CONTRACT_ADDRESS !== "0x0000000000000000000000000000000000000000";
+if (!isDeployed) $("deployNotice").style.display = "block";
+$("contractAddr").textContent = isDeployed ? CONTRACT_ADDRESS : "TBD (not deployed yet)";
+
+function setStatus(msg, kind) {
+  const el = $("status");
+  el.textContent = msg;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+function short(addr) { return addr ? addr.slice(0, 6) + "…" + addr.slice(-4) : "—"; }
+function dayToDate(day) {
+  if (!day || day === 0) return "Never";
+  return new Date(day * 86400 * 1000).toISOString().slice(0, 10);
+}
+
+async function ensureBsc() {
+  const net = await provider.getNetwork();
+  $("network").textContent = net.chainId === BSC_CHAIN_ID ? "BNB Chain (56)" : "Chain " + net.chainId;
+  if (net.chainId !== BSC_CHAIN_ID) {
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: "0x38" }]
+      });
+    } catch (e) {
+      setStatus("Please switch your wallet to BNB Chain (56).", "error");
+      throw e;
+    }
+  }
+}
+
+async function connect() {
+  if (!window.ethereum) { setStatus("No wallet found. Install MetaMask or Binance Wallet.", "error"); return; }
+  try {
+    provider = new ethers.providers.Web3Provider(window.ethereum);
+    await provider.send("eth_requestAccounts", []);
+    await ensureBsc();
+    signer = provider.getSigner();
+    userAddress = await signer.getAddress();
+    $("address").textContent = short(userAddress);
+    setStatus("Connected.", "ok");
+    if (isDeployed) {
+      contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, provider);
+      registry = new ethers.Contract(AGENT_ID_REGISTRY, REGISTRY_ABI, provider);
+      await refreshUser();
+      await loadLeaderboard();
+    } else {
+      $("holder").textContent = "— (contract not deployed)";
+    }
+  } catch (e) {
+    console.error(e);
+    setStatus("Connection failed: " + (e.message || e), "error");
+  }
+}
+
+async function refreshUser() {
+  const [isHolder, streak, total, lastDay, globalTotal] = await Promise.all([
+    registry.balanceOf(userAddress),
+    contract.getStreak(userAddress),
+    contract.getTotalCheckins(userAddress),
+    contract.getLastCheckinDay(userAddress),
+    contract.totalCheckinsAll()
+  ]);
+  const holder = isHolder.gt(0);
+  $("holder").innerHTML = holder
+    ? '<span class="holder-yes">Yes ✅</span>'
+    : '<span class="holder-no">No — you need an Agent ID</span>';
+  $("streak").textContent = streak.toString();
+  $("myTotal").textContent = total.toString();
+  $("lastDay").textContent = dayToDate(lastDay.toNumber());
+  $("globalTotal").textContent = globalTotal.toString();
+
+  const today = Math.floor(Date.now() / 1000 / 86400);
+  const alreadyToday = lastDay.toNumber() === today;
+  const btn = $("checkinBtn");
+  if (!holder) {
+    btn.disabled = true;
+    $("checkinStatus").textContent = "Only Agent ID holders can check in.";
+  } else if (alreadyToday) {
+    btn.disabled = true;
+    $("checkinStatus").textContent = "Already checked in today — come back tomorrow!";
+  } else {
+    btn.disabled = false;
+    $("checkinStatus").textContent = holder && streak.gt(0)
+      ? "Check in to keep your " + streak.toString() + "-day streak alive!"
+      : "First check-in starts your streak.";
+  }
+}
+
+async function doCheckIn() {
+  if (!contract || !signer) return;
+  const btn = $("checkinBtn");
+  btn.disabled = true;
+  $("checkinStatus").textContent = "Sending transaction… confirm in your wallet.";
+  try {
+    const tx = await contract.connect(signer).checkIn();
+    $("checkinStatus").textContent = "Waiting for confirmation… " + tx.hash.slice(0, 10) + "…";
+    await tx.wait();
+    $("checkinStatus").textContent = "✅ Checked in! Streak updated.";
+    await refreshUser();
+    await loadLeaderboard();
+  } catch (e) {
+    console.error(e);
+    $("checkinStatus").textContent = "Check-in failed: " + (e.reason || e.message || e);
+    btn.disabled = false;
+  }
+}
+
+async function loadLeaderboard() {
+  if (!contract) return;
+  const el = $("leaderboard");
+  el.innerHTML = '<p class="muted">Loading…</p>';
+  try {
+    const events = await contract.queryFilter(contract.filters.CheckIn(), DEPLOY_BLOCK, "latest");
+    const users = [...new Set(events.map((e) => e.args.user))];
+    if (users.length === 0) { el.innerHTML = '<p class="muted">No check-ins yet. Be the first!</p>'; return; }
+    const rows = [];
+    for (const u of users) {
+      const [total, streak] = await Promise.all([
+        contract.getTotalCheckins(u),
+        contract.getStreak(u)
+      ]);
+      rows.push({ user: u, total: total.toNumber(), streak: streak.toNumber() });
+    }
+    rows.sort((a, b) => b.total - a.total);
+    const top = rows.slice(0, 10);
+    let html = '<table><tr><th>#</th><th>Address</th><th>Check-ins</th><th>Streak</th></tr>';
+    top.forEach((r, i) => {
+      const mark = r.user.toLowerCase() === (userAddress || "").toLowerCase() ? " 👈 you" : "";
+      html += `<tr><td>${i + 1}</td><td class="addr">${short(r.user)}${mark}</td><td>${r.total}</td><td>${r.streak}🔥</td></tr>`;
+    });
+    html += "</table>";
+    el.innerHTML = html;
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<p class="muted">Could not load leaderboard: ' + (e.message || e) + "</p>";
+  }
+}
+
+$("connectBtn").addEventListener("click", connect);
+$("checkinBtn").addEventListener("click", doCheckIn);
+$("refreshBtn").addEventListener("click", loadLeaderboard);
+if (window.ethereum) {
+  window.ethereum.on("accountsChanged", () => location.reload());
+  window.ethereum.on("chainChanged", () => location.reload());
+}
+</script>
+</body>
+</html>

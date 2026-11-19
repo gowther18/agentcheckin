@@ -1,0 +1,9 @@
+# Foundry build outputs
+/out/
+/cache/
+/broadcast/
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
